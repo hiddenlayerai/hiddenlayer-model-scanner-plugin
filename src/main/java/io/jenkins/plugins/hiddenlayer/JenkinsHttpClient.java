@@ -47,8 +47,9 @@ public class JenkinsHttpClient implements HttpClient {
         } catch (IOException e) {
             throw new HiddenLayerIoException("Request failed", e);
         } finally {
-            if (request.body() != null) {
-                request.body().close();
+            HttpRequestBody requestBody = request.body();
+            if (requestBody != null) {
+                requestBody.close();
             }
         }
     }
@@ -74,8 +75,9 @@ public class JenkinsHttpClient implements HttpClient {
             if (e instanceof CancellationException) {
                 call.cancel();
             }
-            if (request.body() != null) {
-                request.body().close();
+            HttpRequestBody requestBody = request.body();
+            if (requestBody != null) {
+                requestBody.close();
             }
         });
 
@@ -86,9 +88,10 @@ public class JenkinsHttpClient implements HttpClient {
     public void close() {
         okHttpClient.dispatcher().executorService().shutdown();
         okHttpClient.connectionPool().evictAll();
-        if (okHttpClient.cache() != null) {
+        okhttp3.Cache cache = okHttpClient.cache();
+        if (cache != null) {
             try {
-                okHttpClient.cache().close();
+                cache.close();
             } catch (IOException e) {
                 // Ignore
             }
@@ -129,21 +132,28 @@ public class JenkinsHttpClient implements HttpClient {
 
     private Request toOkHttpRequest(HttpRequest request, okhttp3.OkHttpClient client) {
         RequestBody body = null;
-        if (request.body() != null) {
-            body = toOkHttpRequestBody(request.body());
+        HttpRequestBody httpRequestBody = request.body();
+        if (httpRequestBody != null) {
+            body = toOkHttpRequestBody(httpRequestBody);
         }
         if (body == null && requiresBody(request.method())) {
             body = RequestBody.create("", null);
         }
 
-        HttpUrl.Builder urlBuilder = HttpUrl.parse(request.baseUrl()).newBuilder();
+        HttpUrl parsedUrl = HttpUrl.parse(request.baseUrl());
+        if (parsedUrl == null) {
+            throw new HiddenLayerIoException("Invalid base URL: " + request.baseUrl(), null);
+        }
+        HttpUrl.Builder urlBuilder = parsedUrl.newBuilder();
         for (String segment : request.pathSegments()) {
             urlBuilder.addPathSegment(segment);
         }
         QueryParams queryParams = request.queryParams();
-        for (String key : queryParams.keys()) {
-            for (String value : queryParams.values(key)) {
-                urlBuilder.addQueryParameter(key, value);
+        if (queryParams != null) {
+            for (String key : queryParams.keys()) {
+                for (String value : queryParams.values(key)) {
+                    urlBuilder.addQueryParameter(key, value);
+                }
             }
         }
 
@@ -177,7 +187,8 @@ public class JenkinsHttpClient implements HttpClient {
     }
 
     private RequestBody toOkHttpRequestBody(HttpRequestBody body) {
-        MediaType mediaType = body.contentType() != null ? MediaType.parse(body.contentType()) : null;
+        String contentType = body.contentType();
+        MediaType mediaType = contentType != null ? MediaType.parse(contentType) : null;
         long length = body.contentLength();
 
         return new RequestBody() {
@@ -205,6 +216,7 @@ public class JenkinsHttpClient implements HttpClient {
 
     private HttpResponse toResponse(Response response) {
         Headers headers = toHeaders(response.headers());
+        okhttp3.ResponseBody responseBody = response.body();
 
         return new HttpResponse() {
             @Override
@@ -219,12 +231,17 @@ public class JenkinsHttpClient implements HttpClient {
 
             @Override
             public InputStream body() {
-                return response.body().byteStream();
+                if (responseBody == null) {
+                    return InputStream.nullInputStream();
+                }
+                return responseBody.byteStream();
             }
 
             @Override
             public void close() {
-                response.body().close();
+                if (responseBody != null) {
+                    responseBody.close();
+                }
             }
         };
     }
