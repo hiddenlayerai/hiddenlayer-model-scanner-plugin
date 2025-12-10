@@ -1,15 +1,19 @@
 package io.jenkins.plugins.hiddenlayer;
 
 import com.hiddenlayer.api.client.HiddenLayerClient;
-import com.hiddenlayer.api.client.okhttp.HiddenLayerOkHttpClient;
+import com.hiddenlayer.api.client.HiddenLayerClientImpl;
+import com.hiddenlayer.api.core.ClientOptions;
 import hudson.ProxyConfiguration;
 import hudson.util.Secret;
-import java.net.Authenticator;
 import java.net.InetSocketAddress;
-import java.net.PasswordAuthentication;
 import java.net.Proxy;
 import java.util.regex.Pattern;
 import jenkins.model.Jenkins;
+import okhttp3.Authenticator;
+import okhttp3.Credentials;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.Route;
 
 public class ModelScanServiceFactory {
 
@@ -26,16 +30,24 @@ public class ModelScanServiceFactory {
             return instance;
         }
 
-        HiddenLayerOkHttpClient.Builder builder =
-                HiddenLayerOkHttpClient.builder().clientId(clientId).clientSecret(clientSecret.getPlainText());
+        JenkinsHttpClient.Builder httpClientBuilder = JenkinsHttpClient.builder();
 
         Proxy proxy = getJenkinsProxy();
         if (proxy != null) {
-            builder.proxy(proxy);
-            configureProxyAuthentication();
+            httpClientBuilder.proxy(proxy);
+            Authenticator proxyAuth = getProxyAuthenticator();
+            if (proxyAuth != null) {
+                httpClientBuilder.proxyAuthenticator(proxyAuth);
+            }
         }
 
-        HiddenLayerClient client = builder.build();
+        ClientOptions clientOptions = ClientOptions.builder()
+                .httpClient(httpClientBuilder.build())
+                .clientId(clientId)
+                .clientSecret(clientSecret.getPlainText())
+                .build();
+
+        HiddenLayerClient client = new HiddenLayerClientImpl(clientOptions);
         return new ModelScannerWrapper(client.modelScanner());
     }
 
@@ -73,10 +85,10 @@ public class ModelScanServiceFactory {
         return false;
     }
 
-    private static void configureProxyAuthentication() {
+    private static Authenticator getProxyAuthenticator() {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         if (jenkins == null || jenkins.proxy == null) {
-            return;
+            return null;
         }
 
         ProxyConfiguration proxyConfig = jenkins.proxy;
@@ -84,18 +96,20 @@ public class ModelScanServiceFactory {
         Secret password = proxyConfig.getSecretPassword();
 
         if (username == null || username.isEmpty()) {
-            return;
+            return null;
         }
 
-        Authenticator.setDefault(new Authenticator() {
+        String passwordStr = password != null ? password.getPlainText() : "";
+
+        return new Authenticator() {
             @Override
-            protected PasswordAuthentication getPasswordAuthentication() {
-                if (getRequestorType() == RequestorType.PROXY) {
-                    return new PasswordAuthentication(
-                            username, password != null ? password.getPlainText().toCharArray() : new char[0]);
-                }
-                return null;
+            public Request authenticate(Route route, Response response) {
+                String credential = Credentials.basic(username, passwordStr);
+                return response.request()
+                        .newBuilder()
+                        .header("Proxy-Authorization", credential)
+                        .build();
             }
-        });
+        };
     }
 }
