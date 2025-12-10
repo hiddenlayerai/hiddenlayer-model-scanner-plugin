@@ -2,9 +2,9 @@ package io.jenkins.plugins.hiddenlayer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.hiddenlayer.sdk.rest.models.ModelInventoryInfo;
-import com.hiddenlayer.sdk.rest.models.ScanReportV3;
+import com.hiddenlayer.api.models.scans.results.ScanReport;
 import java.time.OffsetDateTime;
+import java.util.Collections;
 import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -15,21 +15,42 @@ public class ScanReporterTest {
 
     @Test
     public void testSummarizeScan() {
-
-        ModelInventoryInfo mii = new ModelInventoryInfo();
-        mii.setModelName("perceptron");
-        mii.setModelVersion("1.0.0");
-        mii.setModelId("model-id");
-
-        ScanReportV3 scanReport = new ScanReportV3();
-        scanReport.setStatus(ScanReportV3.StatusEnum.DONE);
-        scanReport.setInventory(mii);
-        scanReport.setScanId("scan-id");
-        scanReport.setSeverity(ScanReportV3.SeverityEnum.SAFE);
         OffsetDateTime offsetDateTime = OffsetDateTime.parse("2021-01-01T00:00:00Z");
-        scanReport.setEndTime(offsetDateTime);
-        scanReport.setVersion("24.10.2");
-        String summary = ScanReporter.summarizeScan(scanReport);
+
+        ScanReport.Inventory inventory = ScanReport.Inventory.builder()
+                .modelId("model-id")
+                .modelName("perceptron")
+                .modelVersionId("version-id")
+                .requestedScanLocation("/path/to/model")
+                .modelVersion("1.0.0")
+                .build();
+
+        ScanReport.Summary summary = ScanReport.Summary.builder()
+                .detectionCategories(Collections.emptyList())
+                .detectionCount(0L)
+                .fileCount(1L)
+                .filesFailedToScan(0L)
+                .filesWithDetectionsCount(0L)
+                .highestSeverity(ScanReport.Summary.HighestSeverity.NONE)
+                .severity(ScanReport.Summary.Severity.SAFE)
+                .unknownFiles(0L)
+                .build();
+
+        ScanReport scanReport = ScanReport.builder()
+                .detectionCount(0L)
+                .fileCount(1L)
+                .filesWithDetectionsCount(0L)
+                .inventory(inventory)
+                .scanId("scan-id")
+                .startTime(offsetDateTime)
+                .status(ScanReport.Status.DONE)
+                .summary(summary)
+                .version("24.10.2")
+                .endTime(offsetDateTime)
+                .severity(ScanReport.Severity.SAFE)
+                .build();
+
+        String reportSummary = ScanReporter.summarizeScan(scanReport);
 
         assertEquals(
                 "Scan results for model \"perceptron\", version 1.0.0:" + System.lineSeparator()
@@ -39,6 +60,6 @@ public class ScanReporterTest {
                         + "Scanner version: 24.10.2" + System.lineSeparator()
                         + "Console scan link: https://console.us.hiddenlayer.ai/model-details/model-id/scans/scan-id"
                         + System.lineSeparator(),
-                summary);
+                reportSummary);
     }
 }
