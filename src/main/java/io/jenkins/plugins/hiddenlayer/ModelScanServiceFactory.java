@@ -77,7 +77,11 @@ public class ModelScanServiceFactory {
     }
 
     private static boolean isNoProxyHost(ProxyConfiguration proxyConfig, String host) {
-        for (Pattern pattern : proxyConfig.getNoProxyHostPatterns()) {
+        return matchesNoProxyPattern(proxyConfig.getNoProxyHostPatterns(), host);
+    }
+
+    static boolean matchesNoProxyPattern(Iterable<Pattern> patterns, String host) {
+        for (Pattern pattern : patterns) {
             if (pattern.matcher(host).matches()) {
                 return true;
             }
@@ -100,11 +104,14 @@ public class ModelScanServiceFactory {
         }
 
         String passwordStr = password != null ? password.getPlainText() : "";
+        return createProxyAuthenticator(username, passwordStr);
+    }
 
+    static Authenticator createProxyAuthenticator(String username, String password) {
         return new Authenticator() {
             @Override
             public Request authenticate(Route route, Response response) {
-                String credential = Credentials.basic(username, passwordStr);
+                String credential = Credentials.basic(username, password);
                 return response.request()
                         .newBuilder()
                         .header("Proxy-Authorization", credential)
