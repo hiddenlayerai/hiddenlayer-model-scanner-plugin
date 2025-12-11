@@ -6,15 +6,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.hiddenlayer.sdk.ModelScanService;
-import com.hiddenlayer.sdk.rest.models.ModelInventoryInfo;
-import com.hiddenlayer.sdk.rest.models.ScanReportV3;
+import com.hiddenlayer.api.models.scans.results.ScanReport;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Label;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.time.OffsetDateTime;
+import java.util.Collections;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
@@ -41,31 +40,51 @@ public class HLScanModelBuilderTest {
     final String scanMessage = String.format("Scanning model %s in folder %s", modelName, folderToScan);
 
     // Test objects
-    private ModelScanService mockModelScanService;
+    private ScannerService mockScannerService;
     private String modelVersion = "1.0.0";
     private String modelId = "model-id";
     private String scanId = "scan-id";
 
     @Before
     public void setUp() throws IOException, URISyntaxException, InterruptedException, Exception {
-        mockModelScanService = mock(ModelScanService.class);
+        mockScannerService = mock(ScannerService.class);
 
-        ModelInventoryInfo mii = new ModelInventoryInfo();
-        mii.setModelName(modelName);
-        mii.setModelVersion(modelVersion);
-        mii.setModelId(modelId);
-
-        ScanReportV3 scanReport = new ScanReportV3();
-        scanReport.setStatus(ScanReportV3.StatusEnum.DONE);
-        scanReport.setInventory(mii);
-        scanReport.setScanId(scanId);
-        scanReport.setSeverity(ScanReportV3.SeverityEnum.SAFE);
         OffsetDateTime offsetDateTime = OffsetDateTime.parse("2021-01-01T00:00:00Z");
-        scanReport.setEndTime(offsetDateTime);
-        scanReport.setVersion("24.10.2");
 
-        when(mockModelScanService.scanFolder(anyString(), anyString(), eq(true)))
-                .thenReturn(scanReport);
+        ScanReport.Inventory inventory = ScanReport.Inventory.builder()
+                .modelId(modelId)
+                .modelName(modelName)
+                .modelVersionId("version-id")
+                .requestedScanLocation("/path/to/model")
+                .modelVersion(modelVersion)
+                .build();
+
+        ScanReport.Summary summary = ScanReport.Summary.builder()
+                .detectionCategories(Collections.emptyList())
+                .detectionCount(0L)
+                .fileCount(1L)
+                .filesFailedToScan(0L)
+                .filesWithDetectionsCount(0L)
+                .highestSeverity(ScanReport.Summary.HighestSeverity.NONE)
+                .severity(ScanReport.Summary.Severity.SAFE)
+                .unknownFiles(0L)
+                .build();
+
+        ScanReport scanReport = ScanReport.builder()
+                .detectionCount(0L)
+                .fileCount(1L)
+                .filesWithDetectionsCount(0L)
+                .inventory(inventory)
+                .scanId(scanId)
+                .startTime(offsetDateTime)
+                .status(ScanReport.Status.DONE)
+                .summary(summary)
+                .version("24.10.2")
+                .endTime(offsetDateTime)
+                .severity(ScanReport.Severity.SAFE)
+                .build();
+
+        when(mockScannerService.scanFolder(eq(modelName), anyString())).thenReturn(scanReport);
     }
 
     @After
@@ -84,10 +103,10 @@ public class HLScanModelBuilderTest {
         // Save and reload the project configuration
         project = jenkins.configRoundtrip(project);
 
-        // Set mock service after roundtrip
+        // Set mock scanner after roundtrip
         HLScanModelBuilder gotBuilder =
                 (HLScanModelBuilder) project.getBuildersList().get(0);
-        gotBuilder.setModelScanService(mockModelScanService);
+        gotBuilder.setModelScanner(mockScannerService);
 
         jenkins.assertEqualDataBoundBeans(builder, gotBuilder);
     }
@@ -106,8 +125,8 @@ public class HLScanModelBuilderTest {
     // Test that the builder can be created and run in a scripted pipeline
     @Test
     public void testScriptedPipeline() throws Exception {
-        // Set up the mock service globally
-        ModelScanServiceFactory.setTestInstance(mockModelScanService);
+        // Set up the mock scanner globally
+        ModelScanServiceFactory.setTestInstance(mockScannerService);
 
         String agentLabel = "my-agent";
         jenkins.createOnlineSlave(Label.get(agentLabel)); // this Jenkins method name needs updating
@@ -124,13 +143,13 @@ public class HLScanModelBuilderTest {
         jenkins.assertLogContains(scanMessage, completedBuild);
 
         // Add verification that mock was called with expected parameters
-        verify(mockModelScanService).scanFolder(anyString(), eq(modelName), eq(true));
+        verify(mockScannerService).scanFolder(eq(modelName), anyString());
     }
 
     private HLScanModelBuilder createBuilder() {
         HLScanModelBuilder builder = new HLScanModelBuilder(
                 modelName, hlClientId, hlClientSecret, folderToScan, failUnsupported, failSeverity);
-        builder.setModelScanService(mockModelScanService);
+        builder.setModelScanner(mockScannerService);
         return builder;
     }
 }
