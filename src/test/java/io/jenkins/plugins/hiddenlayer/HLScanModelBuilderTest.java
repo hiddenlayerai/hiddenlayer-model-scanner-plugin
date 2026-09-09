@@ -85,6 +85,7 @@ public class HLScanModelBuilderTest {
                 .build();
 
         when(mockScannerService.scanFolder(eq(modelName), anyString())).thenReturn(scanReport);
+        ModelScanServiceFactory.setTestInstance(mockScannerService);
     }
 
     @After
@@ -103,10 +104,8 @@ public class HLScanModelBuilderTest {
         // Save and reload the project configuration
         project = jenkins.configRoundtrip(project);
 
-        // Set mock scanner after roundtrip
         HLScanModelBuilder gotBuilder =
                 (HLScanModelBuilder) project.getBuildersList().get(0);
-        gotBuilder.setModelScanner(mockScannerService);
 
         jenkins.assertEqualDataBoundBeans(builder, gotBuilder);
     }
@@ -125,9 +124,6 @@ public class HLScanModelBuilderTest {
     // Test that the builder can be created and run in a scripted pipeline
     @Test
     public void testScriptedPipeline() throws Exception {
-        // Set up the mock scanner globally
-        ModelScanServiceFactory.setTestInstance(mockScannerService);
-
         String agentLabel = "my-agent";
         jenkins.createOnlineSlave(Label.get(agentLabel)); // this Jenkins method name needs updating
         WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-scripted-pipeline");
@@ -147,9 +143,7 @@ public class HLScanModelBuilderTest {
     }
 
     private HLScanModelBuilder createBuilder() {
-        HLScanModelBuilder builder = new HLScanModelBuilder(
+        return new HLScanModelBuilder(
                 modelName, hlClientId, hlClientSecret, folderToScan, failUnsupported, failSeverity);
-        builder.setModelScanner(mockScannerService);
-        return builder;
     }
 }

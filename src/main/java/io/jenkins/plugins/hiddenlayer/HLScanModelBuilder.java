@@ -6,7 +6,6 @@ import hudson.AbortException;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
-import hudson.FilePath.FileCallable;
 import hudson.Launcher;
 import hudson.model.AbstractProject;
 import hudson.model.Item;
@@ -22,10 +21,9 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.Serial;
 import java.io.StringWriter;
-import jenkins.security.Roles;
+import jenkins.MasterToSlaveFileCallable;
 import jenkins.tasks.SimpleBuildStep;
 import org.jenkinsci.Symbol;
-import org.jenkinsci.remoting.RoleChecker;
 import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
@@ -53,10 +51,6 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
 
     // Fail the build if the model has a severity level greater than or equal to the specified level
     private FailOnDetectionSeverityEnum failOnSeverity;
-
-    // Scanner used to call the HiddenLayer Model Scanner.
-    // Mark it as transient so it won't be serialized with the object, to avoid security problems.
-    private transient ScannerService modelScanner;
 
     @DataBoundConstructor
     public HLScanModelBuilder(
@@ -128,14 +122,6 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
         this.failOnSeverity = failOnSeverity;
     }
 
-    public ScannerService getModelScanner() {
-        return modelScanner;
-    }
-
-    public void setModelScanner(ScannerService modelScanner) {
-        this.modelScanner = modelScanner;
-    }
-
     /**
      * Execute the build step:
      * - Scan the ML model in the specified folder by calling the HiddenLayer Model Scanner
@@ -148,34 +134,8 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
         listener.getLogger().printf("Scanning model %s in folder %s ...%n", modelName, folderToScan);
 
         try {
-            // Initialize the ModelScanner if needed (tests may inject a mock scanner)
-            if (modelScanner == null) {
-                modelScanner = ModelScanServiceFactory.getInstance(hlClientId, hlClientSecret);
-            }
-
-            // Scan the model in folderToScan
             FilePath folderPath = new FilePath(workspace, folderToScan);
-            ScanReport report = folderPath.act(new FileCallable<>() {
-                @Serial
-                private static final long serialVersionUID = 1L;
-
-                @Override
-                public ScanReport invoke(File f, VirtualChannel channel) {
-                    String folder = f.getAbsolutePath();
-                    try {
-                        ScanReport report = modelScanner.scanFolder(modelName, folder);
-                        return report;
-                    } catch (Exception e) {
-                        listener.getLogger().println("Error scanning model: " + e.getMessage());
-                        throw new RuntimeException(e);
-                    }
-                }
-
-                @Override
-                public void checkRoles(RoleChecker checker) throws SecurityException {
-                    checker.check(this, Roles.SLAVE);
-                }
-            });
+            ScanReport report = folderPath.act(new ScanFolderCallable(modelName, hlClientId, hlClientSecret));
 
             // Summarize the scan results for the user
             String summary = ScanReporter.summarizeScan(report);
@@ -234,6 +194,37 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
             e.printStackTrace(pw);
             listener.getLogger().println(writer);
             throw new AbortException("Error scanning model: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Runs the scan on the node that owns the workspace. Must be a static class so Jenkins remoting
+     * can serialize it to remote agents without capturing {@link HLScanModelBuilder} or {@link TaskListener}.
+     */
+    static final class ScanFolderCallable extends MasterToSlaveFileCallable<ScanReport> {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        private final String modelName;
+        private final String clientId;
+        private final Secret clientSecret;
+
+        ScanFolderCallable(String modelName, String clientId, Secret clientSecret) {
+            this.modelName = modelName;
+            this.clientId = clientId;
+            this.clientSecret = clientSecret;
+        }
+
+        @Override
+        public ScanReport invoke(File f, VirtualChannel channel) throws IOException {
+            try {
+                ScannerService scanner = ModelScanServiceFactory.getInstance(clientId, clientSecret);
+                return scanner.scanFolder(modelName, f.getAbsolutePath());
+            } catch (IOException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IOException(e.getMessage(), e);
+            }
         }
     }
 
