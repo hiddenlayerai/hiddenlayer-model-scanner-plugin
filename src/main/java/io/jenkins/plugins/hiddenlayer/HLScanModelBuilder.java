@@ -1,7 +1,6 @@
 package io.jenkins.plugins.hiddenlayer;
 
 import com.hiddenlayer.api.models.scans.results.ScanReport;
-import com.hiddenlayer.api.models.scans.results.ScanReport.Severity;
 import hudson.AbortException;
 import hudson.EnvVars;
 import hudson.Extension;
@@ -135,19 +134,20 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
 
         try {
             FilePath folderPath = new FilePath(workspace, folderToScan);
-            ScanReport report = folderPath.act(new ScanFolderCallable(modelName, hlClientId, hlClientSecret));
+            ScanResult report = folderPath.act(new ScanFolderCallable(modelName, hlClientId, hlClientSecret));
 
             // Summarize the scan results for the user
             String summary = ScanReporter.summarizeScan(report);
             listener.getLogger().print(summary);
-            Severity reportSeverity = report.severity().orElse(null);
-            if (failOnUnsupported && (reportSeverity == null || Severity.UNKNOWN.equals(reportSeverity))) {
+            ScanResult.Severity reportSeverity = report.getSeverity().orElse(null);
+            if (failOnUnsupported && (reportSeverity == null || ScanResult.Severity.UNKNOWN.equals(reportSeverity))) {
                 throw new AbortException("Model type is not supported by HiddenLayer");
             }
             if (failOnSeverity != FailOnDetectionSeverityEnum.NONE && reportSeverity != null) {
                 // just kick out if SAFE or UNKNOWN
-                if (!Severity.UNKNOWN.equals(reportSeverity) && !Severity.SAFE.equals(reportSeverity)) {
-                    if (Severity.LOW.equals(reportSeverity)) {
+                if (!ScanResult.Severity.UNKNOWN.equals(reportSeverity)
+                        && !ScanResult.Severity.SAFE.equals(reportSeverity)) {
+                    if (ScanResult.Severity.LOW.equals(reportSeverity)) {
                         if (failOnSeverity == FailOnDetectionSeverityEnum.LOW) {
                             listener.getLogger()
                                     .printf(
@@ -155,7 +155,7 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
                                             reportSeverity, failOnSeverity);
                             throw new AbortException("Model has " + reportSeverity + " severity detection!");
                         }
-                    } else if (Severity.MEDIUM.equals(reportSeverity)) {
+                    } else if (ScanResult.Severity.MEDIUM.equals(reportSeverity)) {
                         if (failOnSeverity == FailOnDetectionSeverityEnum.MEDIUM
                                 || failOnSeverity == FailOnDetectionSeverityEnum.LOW) {
                             listener.getLogger()
@@ -164,7 +164,7 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
                                             reportSeverity, failOnSeverity);
                             throw new AbortException("Model has " + reportSeverity + " severity detection!");
                         }
-                    } else if (Severity.HIGH.equals(reportSeverity)) {
+                    } else if (ScanResult.Severity.HIGH.equals(reportSeverity)) {
                         if (failOnSeverity == FailOnDetectionSeverityEnum.HIGH
                                 || failOnSeverity == FailOnDetectionSeverityEnum.MEDIUM
                                 || failOnSeverity == FailOnDetectionSeverityEnum.LOW) {
@@ -174,7 +174,7 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
                                             reportSeverity, failOnSeverity);
                             throw new AbortException("Model has " + reportSeverity + " severity detection!");
                         }
-                    } else if (Severity.CRITICAL.equals(reportSeverity)) {
+                    } else if (ScanResult.Severity.CRITICAL.equals(reportSeverity)) {
                         listener.getLogger()
                                 .printf(
                                         "Failing build due to model scan having a %s severity detection (threshold: %s)%n",
@@ -201,7 +201,7 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
      * Runs the scan on the node that owns the workspace. Must be a static class so Jenkins remoting
      * can serialize it to remote agents without capturing {@link HLScanModelBuilder} or {@link TaskListener}.
      */
-    static final class ScanFolderCallable extends MasterToSlaveFileCallable<ScanReport> {
+    static final class ScanFolderCallable extends MasterToSlaveFileCallable<ScanResult> {
         @Serial
         private static final long serialVersionUID = 1L;
 
@@ -216,10 +216,11 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
         }
 
         @Override
-        public ScanReport invoke(File f, VirtualChannel channel) throws IOException {
+        public ScanResult invoke(File f, VirtualChannel channel) throws IOException {
             try {
                 ScannerService scanner = ModelScanServiceFactory.getInstance(clientId, clientSecret);
-                return scanner.scanFolder(modelName, f.getAbsolutePath());
+                ScanReport report = scanner.scanFolder(modelName, f.getAbsolutePath());
+                return ScanResult.from(report);
             } catch (IOException e) {
                 throw e;
             } catch (Exception e) {
