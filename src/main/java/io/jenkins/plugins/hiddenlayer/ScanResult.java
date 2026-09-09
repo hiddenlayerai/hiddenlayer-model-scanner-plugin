@@ -35,7 +35,7 @@ public final class ScanResult implements Serializable {
                 return null;
             }
             try {
-                return Severity.valueOf(sdkSeverity.name());
+                return Severity.valueOf(sdkSeverity.asString().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException e) {
                 return UNKNOWN;
             }

@@ -249,9 +249,7 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
                         : ModelScanServiceFactory.getInstance(clientId, clientSecret, proxySnapshot);
                 ScanReport report = scanner.scanFolder(modelName, f.getAbsolutePath());
                 return ScanResult.from(report);
-            } catch (IOException e) {
-                throw e;
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 throw new IOException(e.getMessage(), e);
             }
         }
