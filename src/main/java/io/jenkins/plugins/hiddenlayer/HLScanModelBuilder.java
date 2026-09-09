@@ -134,7 +134,8 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
 
         try {
             FilePath folderPath = new FilePath(workspace, folderToScan);
-            ScanResult report = folderPath.act(new ScanFolderCallable(modelName, hlClientId, hlClientSecret));
+            ScanResult report = folderPath.act(new ScanFolderCallable(
+                    modelName, hlClientId, hlClientSecret, JenkinsProxySnapshot.fromJenkins()));
 
             // Summarize the scan results for the user
             String summary = ScanReporter.summarizeScan(report);
@@ -208,17 +209,25 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
         private final String modelName;
         private final String clientId;
         private final Secret clientSecret;
+        private final JenkinsProxySnapshot proxySnapshot;
 
         ScanFolderCallable(String modelName, String clientId, Secret clientSecret) {
+            this(modelName, clientId, clientSecret, JenkinsProxySnapshot.none());
+        }
+
+        ScanFolderCallable(
+                String modelName, String clientId, Secret clientSecret, JenkinsProxySnapshot proxySnapshot) {
             this.modelName = modelName;
             this.clientId = clientId;
             this.clientSecret = clientSecret;
+            this.proxySnapshot = proxySnapshot != null ? proxySnapshot : JenkinsProxySnapshot.none();
         }
 
         @Override
         public ScanResult invoke(File f, VirtualChannel channel) throws IOException {
             try {
-                ScannerService scanner = ModelScanServiceFactory.getInstance(clientId, clientSecret);
+                ScannerService scanner =
+                        ModelScanServiceFactory.getInstance(clientId, clientSecret, proxySnapshot);
                 ScanReport report = scanner.scanFolder(modelName, f.getAbsolutePath());
                 return ScanResult.from(report);
             } catch (IOException e) {
