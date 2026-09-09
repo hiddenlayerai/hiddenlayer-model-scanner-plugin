@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.Serial;
+import java.io.Serializable;
 import java.io.StringWriter;
 import jenkins.MasterToSlaveFileCallable;
 import jenkins.tasks.SimpleBuildStep;
@@ -199,6 +200,12 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
     }
 
     /**
+     * Remoting-safe scanner used by tests. Production always constructs the client via
+     * {@link ModelScanServiceFactory} on the node that owns the workspace.
+     */
+    interface SerializableScannerService extends ScannerService, Serializable {}
+
+    /**
      * Runs the scan on the node that owns the workspace. Must be a static class so Jenkins remoting
      * can serialize it to remote agents without capturing {@link HLScanModelBuilder} or {@link TaskListener}.
      */
@@ -210,24 +217,36 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
         private final String clientId;
         private final Secret clientSecret;
         private final JenkinsProxySnapshot proxySnapshot;
+        private final SerializableScannerService scannerOverride;
 
         ScanFolderCallable(String modelName, String clientId, Secret clientSecret) {
-            this(modelName, clientId, clientSecret, JenkinsProxySnapshot.none());
+            this(modelName, clientId, clientSecret, JenkinsProxySnapshot.none(), null);
         }
 
         ScanFolderCallable(
                 String modelName, String clientId, Secret clientSecret, JenkinsProxySnapshot proxySnapshot) {
+            this(modelName, clientId, clientSecret, proxySnapshot, null);
+        }
+
+        ScanFolderCallable(
+                String modelName,
+                String clientId,
+                Secret clientSecret,
+                JenkinsProxySnapshot proxySnapshot,
+                SerializableScannerService scannerOverride) {
             this.modelName = modelName;
             this.clientId = clientId;
             this.clientSecret = clientSecret;
             this.proxySnapshot = proxySnapshot != null ? proxySnapshot : JenkinsProxySnapshot.none();
+            this.scannerOverride = scannerOverride;
         }
 
         @Override
         public ScanResult invoke(File f, VirtualChannel channel) throws IOException {
             try {
-                ScannerService scanner =
-                        ModelScanServiceFactory.getInstance(clientId, clientSecret, proxySnapshot);
+                ScannerService scanner = scannerOverride != null
+                        ? scannerOverride
+                        : ModelScanServiceFactory.getInstance(clientId, clientSecret, proxySnapshot);
                 ScanReport report = scanner.scanFolder(modelName, f.getAbsolutePath());
                 return ScanResult.from(report);
             } catch (IOException e) {

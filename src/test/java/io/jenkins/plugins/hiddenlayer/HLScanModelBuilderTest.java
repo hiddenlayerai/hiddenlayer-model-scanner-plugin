@@ -1,5 +1,7 @@
 package io.jenkins.plugins.hiddenlayer;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -7,10 +9,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.hiddenlayer.api.models.scans.results.ScanReport;
+import hudson.FilePath;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Label;
+import hudson.model.Result;
+import hudson.model.Slave;
+import hudson.util.Secret;
 import java.io.IOException;
+import java.io.Serial;
 import java.net.URISyntaxException;
 import java.time.OffsetDateTime;
 import java.util.Collections;
@@ -49,40 +56,7 @@ public class HLScanModelBuilderTest {
     public void setUp() throws IOException, URISyntaxException, InterruptedException, Exception {
         mockScannerService = mock(ScannerService.class);
 
-        OffsetDateTime offsetDateTime = OffsetDateTime.parse("2021-01-01T00:00:00Z");
-
-        ScanReport.Inventory inventory = ScanReport.Inventory.builder()
-                .modelId(modelId)
-                .modelName(modelName)
-                .modelVersionId("version-id")
-                .requestedScanLocation("/path/to/model")
-                .modelVersion(modelVersion)
-                .build();
-
-        ScanReport.Summary summary = ScanReport.Summary.builder()
-                .detectionCategories(Collections.emptyList())
-                .detectionCount(0L)
-                .fileCount(1L)
-                .filesFailedToScan(0L)
-                .filesWithDetectionsCount(0L)
-                .highestSeverity(ScanReport.Summary.HighestSeverity.NONE)
-                .severity(ScanReport.Summary.Severity.SAFE)
-                .unknownFiles(0L)
-                .build();
-
-        ScanReport scanReport = ScanReport.builder()
-                .detectionCount(0L)
-                .fileCount(1L)
-                .filesWithDetectionsCount(0L)
-                .inventory(inventory)
-                .scanId(scanId)
-                .startTime(offsetDateTime)
-                .status(ScanReport.Status.DONE)
-                .summary(summary)
-                .version("24.10.2")
-                .endTime(offsetDateTime)
-                .severity(ScanReport.Severity.SAFE)
-                .build();
+        ScanReport scanReport = createScanReport(modelName, modelId, modelVersion, scanId);
 
         when(mockScannerService.scanFolder(eq(modelName), anyString())).thenReturn(scanReport);
         ModelScanServiceFactory.setTestInstance(mockScannerService);
@@ -142,8 +116,100 @@ public class HLScanModelBuilderTest {
         verify(mockScannerService).scanFolder(eq(modelName), anyString());
     }
 
+    @Test
+    public void testCallableRunsOnRemoteAgent() throws Exception {
+        Slave agent = jenkins.createOnlineSlave(Label.get("remote-scan"));
+        FilePath folder = agent.getRootPath().child(folderToScan);
+        folder.mkdirs();
+
+        ScanResult result = folder.act(new HLScanModelBuilder.ScanFolderCallable(
+                modelName,
+                hlClientId,
+                Secret.fromString(hlClientSecret),
+                JenkinsProxySnapshot.none(),
+                new FakeScannerService(modelName, modelId, modelVersion, scanId)));
+
+        assertEquals(modelName, result.getModelName());
+        assertEquals(modelVersion, result.getModelVersion());
+        assertEquals(scanId, result.getScanId());
+        assertEquals(ScanResult.Severity.SAFE, result.getSeverity().orElse(null));
+    }
+
+    @Test
+    public void testScriptedPipelineOnRemoteAgentDoesNotFailToSerialize() throws Exception {
+        String agentLabel = "remote-pipeline";
+        jenkins.createOnlineSlave(Label.get(agentLabel));
+        WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-remote-pipeline");
+        String pipelineScript = "node('" + agentLabel + "') {hlScanModel modelName: '" + modelName
+                + "', hlClientId: '" + hlClientId
+                + "', hlClientSecret: '" + hlClientSecret
+                + "', folderToScan: '.'"
+                + ", failOnUnsupported: false"
+                + ", failOnSeverity: 'NONE'}";
+        job.setDefinition(new CpsFlowDefinition(pipelineScript, true));
+        WorkflowRun build = jenkins.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
+        jenkins.assertLogContains("Scanning model " + modelName + " in folder .", build);
+        jenkins.assertLogNotContains("Unable to serialize", build);
+        String log = JenkinsRule.getLog(build);
+        assertFalse("scan callable must serialize to the remote agent", log.contains("NotSerializableException"));
+    }
+
     private HLScanModelBuilder createBuilder() {
         return new HLScanModelBuilder(
                 modelName, hlClientId, hlClientSecret, folderToScan, failUnsupported, failSeverity);
+    }
+
+    static ScanReport createScanReport(String modelName, String modelId, String modelVersion, String scanId) {
+        OffsetDateTime offsetDateTime = OffsetDateTime.parse("2021-01-01T00:00:00Z");
+        return ScanReport.builder()
+                .detectionCount(0L)
+                .fileCount(1L)
+                .filesWithDetectionsCount(0L)
+                .inventory(ScanReport.Inventory.builder()
+                        .modelId(modelId)
+                        .modelName(modelName)
+                        .modelVersionId("version-id")
+                        .requestedScanLocation("/path/to/model")
+                        .modelVersion(modelVersion)
+                        .build())
+                .scanId(scanId)
+                .startTime(offsetDateTime)
+                .status(ScanReport.Status.DONE)
+                .summary(ScanReport.Summary.builder()
+                        .detectionCategories(Collections.emptyList())
+                        .detectionCount(0L)
+                        .fileCount(1L)
+                        .filesFailedToScan(0L)
+                        .filesWithDetectionsCount(0L)
+                        .highestSeverity(ScanReport.Summary.HighestSeverity.NONE)
+                        .severity(ScanReport.Summary.Severity.SAFE)
+                        .unknownFiles(0L)
+                        .build())
+                .version("24.10.2")
+                .endTime(offsetDateTime)
+                .severity(ScanReport.Severity.SAFE)
+                .build();
+    }
+
+    static final class FakeScannerService implements HLScanModelBuilder.SerializableScannerService {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        private final String modelName;
+        private final String modelId;
+        private final String modelVersion;
+        private final String scanId;
+
+        FakeScannerService(String modelName, String modelId, String modelVersion, String scanId) {
+            this.modelName = modelName;
+            this.modelId = modelId;
+            this.modelVersion = modelVersion;
+            this.scanId = scanId;
+        }
+
+        @Override
+        public ScanReport scanFolder(String requestedModelName, String folderPath) {
+            return createScanReport(modelName, modelId, modelVersion, scanId);
+        }
     }
 }
