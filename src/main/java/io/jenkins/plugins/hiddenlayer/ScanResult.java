@@ -48,6 +48,7 @@ public final class ScanResult implements Serializable {
     private final String scanId;
     private final String status;
     private final Severity severity;
+    private final String rawSeverity;
     private final String endTime;
     private final String scannerVersion;
 
@@ -60,6 +61,28 @@ public final class ScanResult implements Serializable {
             Severity severity,
             String endTime,
             String scannerVersion) {
+        this(
+                modelName,
+                modelVersion,
+                modelId,
+                scanId,
+                status,
+                severity,
+                endTime,
+                scannerVersion,
+                severity == null ? null : severity.toString());
+    }
+
+    ScanResult(
+            String modelName,
+            String modelVersion,
+            String modelId,
+            String scanId,
+            String status,
+            Severity severity,
+            String endTime,
+            String scannerVersion,
+            String rawSeverity) {
         this.modelName = modelName;
         this.modelVersion = modelVersion;
         this.modelId = modelId;
@@ -68,6 +91,7 @@ public final class ScanResult implements Serializable {
         this.severity = severity;
         this.endTime = endTime;
         this.scannerVersion = scannerVersion;
+        this.rawSeverity = rawSeverity;
     }
 
     public static ScanResult from(ScanReport report) {
@@ -75,15 +99,18 @@ public final class ScanResult implements Serializable {
         String endTime = report.endTime()
                 .map(dt -> dt.format(END_TIME_FORMATTER))
                 .orElse("unknown");
+        ScanReport.Severity sdkSeverity = report.severity().orElse(null);
+        String rawSeverity = sdkSeverity == null ? null : sdkSeverity.asString();
         return new ScanResult(
                 inventory.modelName(),
                 inventory.modelVersion().orElse("unknown"),
                 inventory.modelId(),
                 report.scanId(),
                 report.status().toString(),
-                Severity.fromSdk(report.severity().orElse(null)),
+                Severity.fromSdk(sdkSeverity),
                 endTime,
-                report.version());
+                report.version(),
+                rawSeverity);
     }
 
     public String getModelName() {
@@ -108,6 +135,23 @@ public final class ScanResult implements Serializable {
 
     public Optional<Severity> getSeverity() {
         return Optional.ofNullable(severity);
+    }
+
+    /**
+     * API severity string when it did not match a known {@link Severity}. Empty when the value was
+     * null, a known level, or the SDK's own {@code unknown}.
+     */
+    public Optional<String> getUnrecognizedSeverity() {
+        if (rawSeverity == null || rawSeverity.isBlank()) {
+            return Optional.empty();
+        }
+        if (severity != Severity.UNKNOWN) {
+            return Optional.empty();
+        }
+        if (Severity.UNKNOWN.toString().equalsIgnoreCase(rawSeverity)) {
+            return Optional.empty();
+        }
+        return Optional.of(rawSeverity);
     }
 
     public String getEndTime() {

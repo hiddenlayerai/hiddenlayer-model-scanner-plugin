@@ -21,6 +21,7 @@ import java.io.PrintWriter;
 import java.io.Serial;
 import java.io.Serializable;
 import java.io.StringWriter;
+import java.util.Optional;
 import jenkins.MasterToSlaveFileCallable;
 import jenkins.tasks.SimpleBuildStep;
 import org.jenkinsci.Symbol;
@@ -141,8 +142,13 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
             // Summarize the scan results for the user
             String summary = ScanReporter.summarizeScan(report);
             listener.getLogger().print(summary);
+            Optional<String> unrecognizedSeverity = report.getUnrecognizedSeverity();
+            unrecognizedSeverity.ifPresent(raw -> listener.getLogger()
+                    .printf("Unrecognized scan severity from HiddenLayer: %s%n", raw));
             ScanResult.Severity reportSeverity = report.getSeverity().orElse(null);
-            if (failOnUnsupported && (reportSeverity == null || ScanResult.Severity.UNKNOWN.equals(reportSeverity))) {
+            if (failOnUnsupported
+                    && unrecognizedSeverity.isEmpty()
+                    && (reportSeverity == null || ScanResult.Severity.UNKNOWN.equals(reportSeverity))) {
                 throw new AbortException("Model type is not supported by HiddenLayer");
             }
             if (failOnSeverity != FailOnDetectionSeverityEnum.NONE && reportSeverity != null) {
@@ -188,6 +194,8 @@ public class HLScanModelBuilder extends Builder implements SimpleBuildStep {
                 }
             }
         } catch (AbortException e) {
+            throw e;
+        } catch (InterruptedException e) {
             throw e;
         } catch (Exception e) {
             listener.getLogger().println("Error scanning model: " + e.getMessage());

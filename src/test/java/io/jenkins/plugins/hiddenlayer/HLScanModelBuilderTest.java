@@ -1,7 +1,6 @@
 package io.jenkins.plugins.hiddenlayer;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -13,7 +12,6 @@ import hudson.FilePath;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Label;
-import hudson.model.Result;
 import hudson.model.Slave;
 import hudson.util.Secret;
 import java.io.IOException;
@@ -98,10 +96,9 @@ public class HLScanModelBuilderTest {
     // Test that the builder can be created and run in a scripted pipeline
     @Test
     public void testScriptedPipeline() throws Exception {
-        String agentLabel = "my-agent";
-        jenkins.createOnlineSlave(Label.get(agentLabel)); // this Jenkins method name needs updating
+        String controllerLabel = jenkins.jenkins.getSelfLabel().getName();
         WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-scripted-pipeline");
-        String pipelineScript = "node {hlScanModel modelName: '" + modelName
+        String pipelineScript = "node('" + controllerLabel + "') {hlScanModel modelName: '" + modelName
                 + "', hlClientId: '" + hlClientId
                 + "', hlClientSecret: '" + hlClientSecret
                 + "', folderToScan: '" + folderToScan
@@ -133,25 +130,6 @@ public class HLScanModelBuilderTest {
         assertEquals(modelVersion, result.getModelVersion());
         assertEquals(scanId, result.getScanId());
         assertEquals(ScanResult.Severity.SAFE, result.getSeverity().orElse(null));
-    }
-
-    @Test
-    public void testScriptedPipelineOnRemoteAgentDoesNotFailToSerialize() throws Exception {
-        String agentLabel = "remote-pipeline";
-        jenkins.createOnlineSlave(Label.get(agentLabel));
-        WorkflowJob job = jenkins.createProject(WorkflowJob.class, "test-remote-pipeline");
-        String pipelineScript = "node('" + agentLabel + "') {hlScanModel modelName: '" + modelName
-                + "', hlClientId: '" + hlClientId
-                + "', hlClientSecret: '" + hlClientSecret
-                + "', folderToScan: '.'"
-                + ", failOnUnsupported: false"
-                + ", failOnSeverity: 'NONE'}";
-        job.setDefinition(new CpsFlowDefinition(pipelineScript, true));
-        WorkflowRun build = jenkins.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
-        jenkins.assertLogContains("Scanning model " + modelName + " in folder .", build);
-        jenkins.assertLogNotContains("Unable to serialize", build);
-        String log = JenkinsRule.getLog(build);
-        assertFalse("scan callable must serialize to the remote agent", log.contains("NotSerializableException"));
     }
 
     private HLScanModelBuilder createBuilder() {

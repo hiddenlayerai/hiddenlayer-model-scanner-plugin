@@ -1,6 +1,7 @@
 package io.jenkins.plugins.hiddenlayer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.hiddenlayer.api.models.scans.results.ScanReport;
 import java.io.ByteArrayInputStream;
@@ -55,6 +56,7 @@ class ScanResultTest {
         assertEquals(ScanResult.Severity.SAFE, result.getSeverity().orElse(null));
         assertEquals("2021-01-01T00:00:00Z", result.getEndTime());
         assertEquals("24.10.2", result.getScannerVersion());
+        assertTrue(result.getUnrecognizedSeverity().isEmpty());
     }
 
     @Test
@@ -82,5 +84,43 @@ class ScanResultTest {
         assertEquals(original.getModelName(), restored.getModelName());
         assertEquals(original.getSeverity(), restored.getSeverity());
         assertEquals(original.getScanId(), restored.getScanId());
+    }
+
+    @Test
+    void fromPreservesUnrecognizedSdkSeverity() {
+        OffsetDateTime endTime = OffsetDateTime.parse("2021-01-01T00:00:00Z");
+        ScanReport scanReport = ScanReport.builder()
+                .detectionCount(0L)
+                .fileCount(1L)
+                .filesWithDetectionsCount(0L)
+                .inventory(ScanReport.Inventory.builder()
+                        .modelId("model-id")
+                        .modelName("perceptron")
+                        .modelVersionId("version-id")
+                        .requestedScanLocation("/path/to/model")
+                        .modelVersion("1.0.0")
+                        .build())
+                .scanId("scan-id")
+                .startTime(endTime)
+                .status(ScanReport.Status.DONE)
+                .summary(ScanReport.Summary.builder()
+                        .detectionCategories(Collections.emptyList())
+                        .detectionCount(0L)
+                        .fileCount(1L)
+                        .filesFailedToScan(0L)
+                        .filesWithDetectionsCount(0L)
+                        .highestSeverity(ScanReport.Summary.HighestSeverity.NONE)
+                        .severity(ScanReport.Summary.Severity.SAFE)
+                        .unknownFiles(0L)
+                        .build())
+                .version("24.10.2")
+                .endTime(endTime)
+                .severity(ScanReport.Severity.of("apocalyptic"))
+                .build();
+
+        ScanResult result = ScanResult.from(scanReport);
+
+        assertEquals(ScanResult.Severity.UNKNOWN, result.getSeverity().orElse(null));
+        assertEquals("apocalyptic", result.getUnrecognizedSeverity().orElse(null));
     }
 }
